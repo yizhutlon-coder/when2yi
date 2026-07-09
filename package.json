@@ -12,7 +12,7 @@
     "apikey": "tsx scripts/create-api-key.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.44.2",
     "nanoid": "^5.1.5",
     "next": "^15.3.4",
