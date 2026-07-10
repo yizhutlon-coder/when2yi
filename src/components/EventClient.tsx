@@ -427,19 +427,21 @@ export default function EventClient({ slug }: { slug: string }) {
                   <details key={i} className="blockrow">
                     <summary>
                       <span className="blocktime">{blockLabel(payload, b)}</span>
-                      <span className="blockdur">{fmtDuration(b.minutes)}</span>
-                      {b.wholeBlockStaffable ? (
-                        <span className="vbadge v-ok-text">✓ staffable throughout</span>
-                      ) : (
-                        <span className="vbadge v-if-text">roster shifts</span>
-                      )}
-                      <button
-                        type="button"
-                        className="small blockcopy"
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyBlock(b, i); }}
-                      >
-                        {copiedBlock === i ? "Copied!" : "Copy roster"}
-                      </button>
+                      <span className="blockmeta">
+                        <span className="blockdur">{fmtDuration(b.minutes)}</span>
+                        {b.wholeBlockStaffable ? (
+                          <span className="vbadge v-ok-text">✓ staffable throughout</span>
+                        ) : (
+                          <span className="vbadge v-if-text">roster shifts</span>
+                        )}
+                        <button
+                          type="button"
+                          className="small blockcopy"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyBlock(b, i); }}
+                        >
+                          {copiedBlock === i ? "Copied!" : "Copy roster"}
+                        </button>
+                      </span>
                     </summary>
                     <div className="blockbody">
                       <div className="rolepills">

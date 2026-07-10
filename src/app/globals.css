@@ -111,8 +111,9 @@ button.small { padding: 3px 9px; font-size: 13px; }
 /* min-width:0 lets a wide grid scroll inside its box instead of stretching the row */
 .gridbox { overflow-x: auto; -webkit-overflow-scrolling: touch; min-width: 0; max-width: 100%; }
 .avgrid { border-collapse: collapse; width: max-content; }
-/* Paint grid captures touch (drag to paint); the read-only group grid stays scrollable. */
-.avgrid-mine { touch-action: none; }
+/* Touch: allow panning/scroll and kill the double-tap-zoom delay so tap-to-toggle
+   feels instant. Mouse drag-paint is unaffected (touch-action ignores the mouse). */
+.avgrid-mine { touch-action: manipulation; }
 .avgrid th { font-size: 11px; color: var(--muted); font-weight: 600; padding: 2px 4px; }
 .avgrid td.timelabel {
   font-size: 10px; color: var(--muted); text-align: right; padding-right: 6px;
@@ -147,14 +148,15 @@ button.small { padding: 3px 9px; font-size: 13px; }
 .blockrow { border: 1px solid var(--line); border-radius: 8px; }
 .blockrow > summary {
   cursor: pointer; list-style: none; user-select: none;
-  display: flex; align-items: center; gap: 10px; padding: 9px 12px; font-size: 14px;
+  display: flex; align-items: center; gap: 8px 10px; padding: 9px 12px; font-size: 14px;
+  flex-wrap: wrap;
 }
 .blockrow > summary::-webkit-details-marker { display: none; }
 .blockrow > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
 .blockrow[open] > summary::before { content: "▾"; }
 .blocktime { font-weight: 600; }
+.blockmeta { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
 .blockdur { color: var(--muted); font-size: 13px; }
-.blockrow > summary .vbadge { margin-left: auto; }
 .blockcopy { flex: 0 0 auto; }
 .blockbody { padding: 0 12px 11px 12px; font-size: 13px; }
 .rolepills { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
@@ -179,4 +181,6 @@ table.plain th, table.plain td { text-align: left; padding: 6px 8px; border-bott
 
 @media (max-width: 800px) {
   .grids { flex-direction: column; }
+  /* Bigger touch targets for tap-to-toggle painting on phones. */
+  .avgrid td.slot { height: 22px; }
 }

@@ -171,6 +171,18 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
     setDraft(null);
   }
 
+  // Touch uses tap-to-toggle (single cell) instead of drag-paint, so the page
+  // still scrolls normally under a finger. `tap` records the touch-down cell/pos
+  // and we toggle only if the finger didn't travel (a tap, not a scroll).
+  const tap = useRef<{ x: number; y: number; key: number } | null>(null);
+  function toggleCell(key: number) {
+    if (!editable || !onChange) return;
+    const base = { ...(mySlots ?? {}) };
+    if (base[String(key)]) delete base[String(key)];
+    else base[String(key)] = paintTier;
+    onChange(base);
+  }
+
   const hoverInfo = hover !== null ? groupBySlot.get(hover) : null;
   const allNames = respondents.map((r) => r.name);
   const unavailable =
@@ -209,11 +221,23 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
                       data-row={row}
                       className={`slot ${min % 60 === 0 ? "hour" : ""} ${tier === "yes" ? "mine-yes" : tier === "if_needed" ? "mine-if" : ""}`}
                       onPointerDown={(e) => {
-                        e.preventDefault();
-                        // Keep receiving moves even if the pointer leaves the
-                        // cell/table; guarded because it throws on inactive pointers.
-                        try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
-                        startPaint(ci, row, key);
+                        if (e.pointerType === "mouse" || e.pointerType === "pen") {
+                          e.preventDefault();
+                          // Keep receiving moves even if the pointer leaves the
+                          // cell/table; guarded because it throws on inactive pointers.
+                          try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+                          startPaint(ci, row, key);
+                        } else {
+                          // Touch: remember where the tap began; don't capture, so a
+                          // drag scrolls the page instead of painting.
+                          tap.current = { x: e.clientX, y: e.clientY, key };
+                        }
+                      }}
+                      onPointerUp={(e) => {
+                        if (e.pointerType === "mouse" || e.pointerType === "pen") return;
+                        const t = tap.current;
+                        tap.current = null;
+                        if (t && Math.abs(e.clientX - t.x) < 10 && Math.abs(e.clientY - t.y) < 10) toggleCell(t.key);
                       }}
                     />
                   );
@@ -266,7 +290,7 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
           <div className="legend">
             <span><span className="swatch" style={{ background: "var(--accent)" }} /> available</span>
             <span><span className="swatch" style={{ background: "var(--if-needed-hatch), var(--accent-soft)" }} /> if needed</span>
-            <span>click &amp; drag to paint</span>
+            <span>drag to paint · tap a cell on touch</span>
           </div>
           {renderTable("mine")}
         </div>
