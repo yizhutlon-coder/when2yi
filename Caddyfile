@@ -1,0 +1,18 @@
+# Automatic HTTPS via Let's Encrypt for {$SITE_ADDRESS}.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# flush_interval -1 disables response buffering so SSE (the live heatmap) streams
+	# through immediately instead of being held back by the proxy.
+	reverse_proxy app:3000 {
+		flush_interval -1
+	}
+
+	# App also sets these via next.config; harmless to reinforce at the edge.
+	header {
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		-Server
+	}
+}

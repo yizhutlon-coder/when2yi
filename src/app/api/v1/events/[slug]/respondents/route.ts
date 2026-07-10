@@ -7,6 +7,7 @@ import { newId, newToken } from "@/lib/ids";
 import { signInInput } from "@/lib/validate";
 import { publish } from "@/lib/sse";
 import { emitChange } from "@/lib/webhooks";
+import { enforceRateLimit } from "@/lib/rateLimit";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
@@ -17,6 +18,9 @@ type Ctx = { params: Promise<{ slug: string }> };
  *  - known name, PIN mismatch → 403
  */
 export async function POST(req: Request, ctx: Ctx) {
+  const limited = enforceRateLimit(req, "signin", 40, 600_000); // 40 / 10 min / IP
+  if (limited) return limited;
+
   const { slug } = await ctx.params;
   const ev = getEventRow(slug);
   if (!ev) return NextResponse.json({ error: "event not found" }, { status: 404 });

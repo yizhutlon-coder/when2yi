@@ -7,11 +7,15 @@ import { validSlotKeySet } from "@/lib/slots";
 import { putAvailabilityInput } from "@/lib/validate";
 import { publish } from "@/lib/sse";
 import { emitChange } from "@/lib/webhooks";
+import { enforceRateLimit } from "@/lib/rateLimit";
 
 type Ctx = { params: Promise<{ slug: string; rid: string }> };
 
 /** Full-replacement PUT — the autosave model (§3.2: no submit button). */
 export async function PUT(req: Request, ctx: Ctx) {
+  const limited = enforceRateLimit(req, "availability", 90, 60_000); // 90 / min / IP
+  if (limited) return limited;
+
   const { slug, rid } = await ctx.params;
   const ev = getEventRow(slug);
   if (!ev) return NextResponse.json({ error: "event not found" }, { status: 404 });

@@ -11,7 +11,9 @@ export const openapi = {
       "When2Meet-style group availability polls, API-first. " +
       "Auth: none for reads; `x-edit-token` for a respondent's own data; " +
       "`x-organizer-token` for event admin; `x-api-key` (or Bearer) for trusted bots — " +
-      "API keys can do anything (create events, edit any event).",
+      "API keys can do anything (create events, edit any event). " +
+      "Light per-IP rate limits apply to event creation, sign-in, and availability saves " +
+      "(HTTP 429 with Retry-After); valid API keys are exempt.",
   },
   paths: {
     "/api/v1/events": {
@@ -47,6 +49,12 @@ export const openapi = {
       get: { summary: "Full event payload: event, slots, tagGroups, respondents+availability" },
       patch: { summary: "Edit event (organizer/API key). Non-destructive range shrink." },
       delete: { summary: "Delete event (organizer/API key)." },
+    },
+    "/api/v1/events/{slug}/rotate-organizer": {
+      post: {
+        summary:
+          "Rotate the organizer token (organizer/API key) — invalidates a leaked admin link and returns a fresh one.",
+      },
     },
     "/api/v1/events/{slug}/respondents": {
       post: {

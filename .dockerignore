@@ -1,0 +1,15 @@
+node_modules
+.next
+data
+backups
+.git
+.gitignore
+*.md
+!README.md
+Dockerfile
+.dockerignore
+docker-compose.yml
+Caddyfile
+.env
+.env.local
+npm-debug.log*

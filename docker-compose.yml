@@ -1,0 +1,44 @@
+# When2Yi — single-process app + Caddy for automatic HTTPS.
+#
+#   1. Point an A record for your domain at this server's IP.
+#   2. Create a .env file next to this (see below).
+#   3. docker compose up -d --build
+#
+# .env:
+#   SITE_ADDRESS=meet.example.com        # your domain (Caddy gets a free cert for it)
+#   # NEXT_PUBLIC_BASE_URL=https://meet.example.com   # optional; usually auto-detected
+#
+# Prefer a Cloudflare Tunnel instead of Caddy? Delete the `caddy` service, change the
+# app's `expose` to `ports: ["127.0.0.1:3000:3000"]`, and run cloudflared at localhost:3000.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/data/when2yi.db
+      # - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+    volumes:
+      - ./data:/app/data          # SQLite lives here — this is your whole database
+    expose:
+      - "3000"                    # reachable only inside the compose network
+    # Single-process by design (in-memory SSE + local SQLite): do NOT scale > 1.
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS:?set SITE_ADDRESS in .env to your domain}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

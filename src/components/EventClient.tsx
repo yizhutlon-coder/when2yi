@@ -90,7 +90,11 @@ export default function EventClient({ slug }: { slug: string }) {
   const [error, setError] = useState("");
   const [notFound, setNotFound] = useState(false);
 
+  // `orgOverride` wins after a rotation so the page immediately uses the fresh token.
+  const [orgOverride, setOrgOverride] = useState<string | null>(null);
+  const [rotated, setRotated] = useState(false);
   const organizerToken =
+    orgOverride ??
     search.get("organizer") ??
     (typeof window !== "undefined" ? localStorage.getItem(`w2y:org:${slug}`) : null);
   const isNew = search.get("new") === "1";
@@ -249,6 +253,23 @@ export default function EventClient({ slug }: { slug: string }) {
     });
   }
 
+  async function rotateOrganizer() {
+    if (!organizerToken) return;
+    if (!confirm("Rotate the organizer link? The current admin link stops working immediately — you'll get a new one to save.")) return;
+    const res = await fetch(`/api/v1/events/${slug}/rotate-organizer`, {
+      method: "POST",
+      headers: { "x-organizer-token": organizerToken },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(typeof data.error === "string" ? data.error : "Could not rotate the link.");
+      return;
+    }
+    localStorage.setItem(`w2y:org:${slug}`, data.organizerToken);
+    setOrgOverride(data.organizerToken);
+    setRotated(true);
+  }
+
   if (notFound) return <p className="error">Event not found — check the link.</p>;
   if (!payload) return <p className="sub">Loading…</p>;
 
@@ -259,9 +280,10 @@ export default function EventClient({ slug }: { slug: string }) {
 
   return (
     <>
-      {isNew && organizerToken && (
+      {(isNew || rotated) && organizerToken && (
         <div className="notice">
-          <b>Save your organizer link</b> (shown once — it's the only way to edit this event):{" "}
+          <b>{rotated ? "New organizer link — save it" : "Save your organizer link"}</b>{" "}
+          {rotated ? "(the old one no longer works):" : "(shown once — it's the only way to edit this event):"}{" "}
           <code>{`${shareUrl}?organizer=${organizerToken}`}</code>
         </div>
       )}
@@ -271,6 +293,11 @@ export default function EventClient({ slug }: { slug: string }) {
         <button className="small" onClick={() => navigator.clipboard.writeText(shareUrl)}>Copy share link</button>
         <a className="chip" href={`/api/v1/events/${slug}/export`}>CSV</a>
         <a className="chip" href="/api/docs?ui">API</a>
+        {organizerToken && (
+          <button className="small danger" onClick={rotateOrganizer} title="Invalidate the current admin link and get a new one">
+            Rotate organizer link
+          </button>
+        )}
         {event.deadline && (
           <span className="sub" style={{ margin: 0 }}>
             {deadlinePassed ? "Responses closed" : `Respond by ${new Date(event.deadline * 1000).toLocaleString()}`}

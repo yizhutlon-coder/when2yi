@@ -4,8 +4,12 @@ import { db, schema } from "@/db";
 import { newId, newSlug, newToken } from "@/lib/ids";
 import { createEventInput } from "@/lib/validate";
 import { getEventRow, loadEventPayload } from "@/lib/eventData";
+import { enforceRateLimit } from "@/lib/rateLimit";
 
 export async function POST(req: Request) {
+  const limited = enforceRateLimit(req, "create-event", 20, 3_600_000); // 20 / hour / IP
+  if (limited) return limited;
+
   const body = await req.json().catch(() => null);
   const parsed = createEventInput.safeParse(body);
   if (!parsed.success) {
