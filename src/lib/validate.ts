@@ -9,6 +9,19 @@ export const tagGroupInput = z.object({
   options: z.array(z.string().trim().min(1).max(40)).min(1).max(30),
 });
 
+/** Composition at creation references role options by (group index, option label),
+ *  since tags have no IDs until they're inserted; the route resolves them. Both
+ *  null → an ≥N-total floor. */
+export const compositionRefInput = z
+  .array(
+    z.object({
+      group: z.number().int().min(0).nullable(),
+      option: z.string().trim().min(1).nullable(),
+      min: z.number().int().min(1).max(100),
+    })
+  )
+  .max(20);
+
 export const createEventInput = z
   .object({
     name: z.string().trim().min(1).max(120),
@@ -23,6 +36,8 @@ export const createEventInput = z
     deadline: z.number().int().positive().optional(),
     roster: z.array(z.string().trim().min(1).max(60)).max(100).optional(),
     tagGroups: z.array(tagGroupInput).max(10).optional(),
+    composition: compositionRefInput.optional(),
+    allowRosterShift: z.boolean().optional(),
   })
   .refine((v) => v.endMin > v.startMin, { message: "endMin must be after startMin" })
   .refine((v) => (v.mode === "dates" ? (v.dates?.length ?? 0) > 0 : (v.days?.length ?? 0) > 0), {
@@ -70,6 +85,36 @@ export const putAvailabilityInput = z.object({
       })
     )
     .max(5000),
+});
+
+/** Composition rule (§3.7). `tagId: null` = an "≥N total" floor. Empty list clears the rule. */
+export const compositionInput = z.object({
+  requirements: z
+    .array(
+      z.object({
+        tagId: z.string().min(1).nullable(),
+        min: z.number().int().min(1).max(100),
+      })
+    )
+    .max(20),
+  allowRosterShift: z.boolean().optional(),
+});
+
+export const WEBHOOK_EVENT_TYPES = [
+  "respondent.created",
+  "respondent.updated",
+  "respondent.deleted",
+  "availability.updated",
+  "event.updated",
+  "composition.updated",
+  "slot.viable",
+  "slot.unviable",
+] as const;
+
+export const webhookInput = z.object({
+  url: z.string().url().max(500),
+  /** Omit / empty = subscribe to all event types. */
+  eventTypes: z.array(z.enum(WEBHOOK_EVENT_TYPES)).max(WEBHOOK_EVENT_TYPES.length).optional(),
 });
 
 export function isValidTimezone(tz: string): boolean {

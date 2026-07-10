@@ -6,6 +6,7 @@ import { getEventRow, slotSpec } from "@/lib/eventData";
 import { validSlotKeySet } from "@/lib/slots";
 import { putAvailabilityInput } from "@/lib/validate";
 import { publish } from "@/lib/sse";
+import { emitChange } from "@/lib/webhooks";
 
 type Ctx = { params: Promise<{ slug: string; rid: string }> };
 
@@ -50,5 +51,6 @@ export async function PUT(req: Request, ctx: Ctx) {
   });
 
   publish(slug, "availability.updated", { respondentId: r.id, count: dedup.size });
+  emitChange(ev, "availability.updated", { respondentId: r.id });
   return NextResponse.json({ ok: true, saved: dedup.size });
 }

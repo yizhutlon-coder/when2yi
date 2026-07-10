@@ -5,6 +5,7 @@ import { isOrganizer } from "@/lib/auth";
 import { getEventRow, loadEventPayload } from "@/lib/eventData";
 import { patchEventInput } from "@/lib/validate";
 import { publish } from "@/lib/sse";
+import { emitChange } from "@/lib/webhooks";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
@@ -46,8 +47,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .where(eq(schema.events.id, ev.id))
     .run();
 
-  const updated = loadEventPayload(getEventRow(slug)!);
+  const updatedRow = getEventRow(slug)!;
+  const updated = loadEventPayload(updatedRow);
   publish(slug, "event.updated");
+  emitChange(updatedRow, "event.updated");
   return NextResponse.json(updated);
 }
 

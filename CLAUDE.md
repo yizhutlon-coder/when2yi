@@ -36,10 +36,27 @@ state lives in `HANDOFF.md`.
 
 ## Current phase
 
-Phase 1 (poll core, API-first) is DONE and verified. Next is Phase 2
-(spec §3.6–§3.8): outbound webhooks incl. `slot.viable`/`slot.unviable`
-with re-arm semantics, composition-viability engine (bipartite matching —
-NOT greedy counting; see spec §3.7 correctness note), heatmap viability
-outline + tag filters, then the ThatYiBot `/meet` plugin (separate project,
-C:\ThatYiBot — the bot itself is still spec-only). `webhooks` table and
-`compositionJson`/`finalizedJson` columns already exist in the schema.
+Phase 1 (poll core) and the Phase 2 web-app half are DONE and verified:
+composition-viability engine (`src/lib/composition.ts`), heatmap viability
+outline + tag filter + composition editor, and outbound webhooks
+(`src/lib/webhooks.ts`) incl. `slot.viable`/`slot.unviable` with per-webhook
+re-arm. See §3.7/§3.6.
+
+Composition correctness (important, cost a real bug once): tag requirements
+are DISJOINT SEATS solved by bipartite max-flow — a multi-role person fills
+one seat, never two (greedy counting overpromises). A `tagId:null` "total"
+requirement is INCLUSIVE HEADCOUNT (`attendees ≥ N`), NOT part of the
+matching — the tank and healer count toward the total. `slotViability`
+returns viable (firm attendees suffice) / viable_if (only with conditional
+or if-needed people; `neededNames` lists them) / unviable.
+
+Webhook `emitChange(ev, type, extra)` is called from every mutation route
+after the DB write; delivery is fire-and-forget HMAC-signed JSON (fine
+because we're one long-lived process). Re-arm state is per-webhook
+`firedKeysJson` = the viable set last announced to that subscriber.
+
+Still Phase 2/3 and NOT built: `deadline.passed` (needs the croner chore)
+and `event.finalized` (Phase 3 finalization) webhook types — reserved in
+`WEBHOOK_EVENT_TYPES`' spirit but not emitted. The ThatYiBot `/meet` plugin
+lives in the separate C:\ThatYiBot repo (still spec-only). `finalizedJson`
+column still unused (Phase 3).

@@ -11,6 +11,9 @@
   --heat-0: #ffffff;
   --heat-max: #1d4ed8;
   --if-needed-hatch: repeating-linear-gradient(45deg, transparent 0 3px, rgba(29, 78, 216, 0.35) 3px 6px);
+  /* Composition viability (spec §3.7): solid ring = met, dashed = met only if pinged. */
+  --viable: #16a34a;
+  --viable-if: #b45309;
 }
 
 * { box-sizing: border-box; }
@@ -40,11 +43,22 @@ h2 { font-size: 18px; margin: 0 0 10px; }
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 18px; margin-bottom: 16px;
 }
+/* collapsible host-config sections (create page + organizer composition editor) */
+details.card > summary {
+  cursor: pointer; font-size: 18px; font-weight: 700; list-style: none;
+  display: flex; align-items: center; gap: 8px; user-select: none;
+}
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: "▸"; color: var(--muted); font-size: 12px; }
+details.card[open] > summary::before { content: "▾"; }
+details.card[open] > summary { margin-bottom: 14px; }
+.hint { font-weight: 400; color: var(--muted); font-size: 13px; }
+
 .row { display: flex; gap: 16px; flex-wrap: wrap; }
 .row > * { flex: 1; min-width: 220px; }
 label.field { display: block; margin-bottom: 12px; font-weight: 600; font-size: 13px; }
 label.field input[type="text"], label.field input[type="datetime-local"],
-label.field select, label.field textarea {
+label.field input[type="number"], label.field select, label.field textarea {
   display: block; width: 100%; margin-top: 4px; padding: 8px 10px;
   border: 1px solid var(--line); border-radius: 7px; font: inherit; background: #fff;
 }
@@ -70,6 +84,12 @@ button.small { padding: 3px 9px; font-size: 13px; }
   cursor: pointer; user-select: none; background: #fff; font-size: 14px;
 }
 .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* create-page: calendar on the left, time-range + timezone on the right */
+.when-layout { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+.when-picker { flex: 0 0 auto; }
+.when-times { flex: 1; min-width: 220px; }
+.when-times .field:last-child { margin-bottom: 0; }
 
 /* create-page mini calendar */
 .cal { border-collapse: collapse; user-select: none; }
@@ -101,6 +121,47 @@ button.small { padding: 3px 9px; font-size: 13px; }
 .avgrid td.slot.mine-if { background: var(--if-needed-hatch), var(--accent-soft); }
 .legend { display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--muted); margin: 8px 0; flex-wrap: wrap; }
 .legend .swatch { display: inline-block; width: 14px; height: 14px; border: 1px solid var(--line); vertical-align: -2px; margin-right: 4px; }
+.legend .swatch.v-ok { border: 2px solid var(--viable); background: #fff; }
+.legend .swatch.v-if { border: 2px dashed var(--viable-if); background: #fff; }
+
+/* composition viability on group cells — viable slots get a bold, unmissable ring */
+.avgrid td.slot.v-ok {
+  box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 4px var(--viable), 0 0 5px 1px rgba(22, 163, 74, 0.85);
+  position: relative; z-index: 1;
+}
+.avgrid td.slot.v-if { box-shadow: inset 0 0 0 2px var(--viable-if); }
+.avgrid td.slot.v-dim { opacity: 0.2; }
+.gridcontrols { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin: 4px 0 10px; }
+.gridcontrols select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.vstatus.v-ok-text { color: var(--viable); }
+.vstatus.v-if-text { color: var(--viable-if); }
+.vstatus.v-no-text { color: var(--muted); }
+/* best-times contiguous blocks (expandable) */
+.blocks { display: flex; flex-direction: column; gap: 6px; }
+.blockrow { border: 1px solid var(--line); border-radius: 8px; }
+.blockrow > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px; font-size: 14px;
+}
+.blockrow > summary::-webkit-details-marker { display: none; }
+.blockrow > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
+.blockrow[open] > summary::before { content: "▾"; }
+.blocktime { font-weight: 600; }
+.blockdur { color: var(--muted); font-size: 13px; }
+.blockrow > summary .vbadge { margin-left: auto; }
+.blockcopy { flex: 0 0 auto; }
+.blockbody { padding: 0 12px 11px 12px; font-size: 13px; }
+.rolepills { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.rolepill {
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600;
+}
+.rolepill.spare { border-color: var(--viable); color: var(--viable); }
+.rolepill.tight { border-color: var(--viable-if); color: var(--viable-if); }
+
+.vbadge { font-size: 13px; font-weight: 600; }
+.v-ok-text { color: var(--viable); }
+.v-if-text { color: var(--viable-if); }
+.v-no-text { color: var(--muted); }
 
 .hoverpanel { min-width: 200px; font-size: 13px; }
 .hoverpanel .who { margin: 4px 0; }

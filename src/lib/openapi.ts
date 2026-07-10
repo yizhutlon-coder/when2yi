@@ -1,6 +1,6 @@
 /**
  * OpenAPI 3.1 document for /api/v1 (spec §3.5: documented API served at /api/docs).
- * Hand-maintained for Phase 1; TODO(phase2): generate from the zod schemas in validate.ts.
+ * Hand-maintained; TODO: generate from the zod schemas in validate.ts.
  */
 export const openapi = {
   openapi: "3.1.0",
@@ -73,8 +73,51 @@ export const openapi = {
     "/api/v1/events/{slug}/summary": {
       get: {
         summary:
-          "Computed summary: top slots (firm yes / conditional yes / if-needed counts + names), missing roster. Phase 2 adds composition viability.",
+          "Computed summary: top slots ranked (composition-viable first, then firm yes / conditional yes / if-needed counts + names), per-slot viability (viable/viable_if/unviable + neededNames), viableCount, missing roster.",
       },
+    },
+    "/api/v1/events/{slug}/composition": {
+      get: { summary: "Current composition rule (or null)." },
+      put: {
+        summary:
+          "Set/replace the composition rule (organizer/API key, editable mid-poll). Requirements = [{tagId|null, min}]; tagId null means an ≥N-total floor. Empty list clears the rule. Returns changedSlots (viability diff). Viability is a bipartite matching, so a multi-role person only fills one seat.",
+        requestBody: {
+          content: {
+            "application/json": {
+              example: {
+                requirements: [
+                  { tagId: "<tank-tag-id>", min: 1 },
+                  { tagId: "<healer-tag-id>", min: 1 },
+                  { tagId: null, min: 4 },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/v1/events/{slug}/webhooks": {
+      get: { summary: "List this event's webhook subscriptions (organizer/API key; secrets not returned)." },
+      post: {
+        summary:
+          "Subscribe a URL to change events (organizer/API key). Secret shown once. Deliveries are POSTs signed with HMAC-SHA256 in x-when2yi-signature and typed via x-when2yi-event. Every payload embeds the summary block.",
+        requestBody: {
+          content: {
+            "application/json": {
+              example: {
+                url: "https://bot.example/hooks/when2yi",
+                eventTypes: ["slot.viable", "slot.unviable", "respondent.created"],
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Subscribed. Returns { id, secret, url, eventTypes }." },
+        },
+      },
+    },
+    "/api/v1/events/{slug}/webhooks/{wid}": {
+      delete: { summary: "Delete a webhook subscription (organizer/API key)." },
     },
     "/api/v1/events/{slug}/export": {
       get: { summary: "CSV export (rows=slots, cols=respondents)." },
@@ -82,7 +125,7 @@ export const openapi = {
     "/api/v1/events/{slug}/stream": {
       get: {
         summary:
-          "SSE stream of change events: respondent.created, availability.updated, event.updated, respondent.updated, respondent.deleted. Phase 2 adds slot.viable/slot.unviable and outbound webhooks.",
+          "SSE stream of change events for live viewers: respondent.created, availability.updated, event.updated, respondent.updated, respondent.deleted. (Outbound webhooks — incl. slot.viable/slot.unviable — are separate; see POST /webhooks.)",
       },
     },
   },

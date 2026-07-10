@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { EventPayload } from "@/lib/eventData";
 import { dayColumns, zonedEpoch } from "@/lib/slots";
+import { viabilityBySlot } from "@/lib/composition";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -54,10 +55,24 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
     }));
   }, [event]);
 
+  // Composition viability per slot (spec §3.7). Independent of the tag-count lens.
+  const composition = event.composition;
+  const viability = useMemo(() => viabilityBySlot(payload, composition), [payload, composition]);
+
+  // Tag-count lens (§3.11): "show overlap counting only Healers".
+  const allTags = useMemo(() => payload.tagGroups.flatMap((g) => g.tags), [payload.tagGroups]);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [viableOnly, setViableOnly] = useState(false);
+
+  const filteredRespondents = useMemo(
+    () => (tagFilter ? respondents.filter((r) => r.tagIds.includes(tagFilter)) : respondents),
+    [respondents, tagFilter]
+  );
+
   // Group availability per slot (firm yes / conditional yes / if-needed).
   const groupBySlot = useMemo(() => {
     const map = new Map<number, { yes: string[]; cond: string[]; ifNeeded: string[] }>();
-    for (const r of respondents) {
+    for (const r of filteredRespondents) {
       for (const [k, tier] of Object.entries(r.availability)) {
         const key = Number(k);
         let rec = map.get(key);
@@ -68,39 +83,66 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
       }
     }
     return map;
-  }, [respondents]);
+  }, [filteredRespondents]);
 
-  const maxCount = Math.max(1, respondents.length);
+  const maxCount = Math.max(1, filteredRespondents.length);
   const [hover, setHover] = useState<number | null>(null);
 
-  // --- painting ---
-  const drag = useRef<{ adding: boolean } | null>(null);
+  // --- painting: When2Meet-style rectangular drag ---
+  // The anchor is the cell where the drag started; as the pointer moves we
+  // repaint the whole rectangle from that anchor to the cell under the pointer,
+  // rebuilding from the pre-drag snapshot each time so cells revert when the
+  // rectangle shrinks. `result` lives in the ref (not draft state) so the
+  // pointerup commit is immune to render batching / stale closures.
+  const drag = useRef<
+    { adding: boolean; anchor: { ci: number; row: number }; base: MySlots; result: MySlots } | null
+  >(null);
   const [draft, setDraft] = useState<MySlots | null>(null);
   const current = draft ?? mySlots ?? {};
 
-  function applyCell(key: number) {
-    if (!drag.current) return;
-    setDraft((d) => {
-      const base = { ...(d ?? mySlots ?? {}) };
-      if (drag.current!.adding) base[String(key)] = paintTier;
-      else delete base[String(key)];
-      return base;
-    });
+  function paintTo(ci: number, row: number) {
+    const d = drag.current;
+    if (!d) return;
+    const c0 = Math.min(d.anchor.ci, ci), c1 = Math.max(d.anchor.ci, ci);
+    const r0 = Math.min(d.anchor.row, row), r1 = Math.max(d.anchor.row, row);
+    const next: MySlots = { ...d.base };
+    for (let c = c0; c <= c1; c++) {
+      for (let r = r0; r <= r1; r++) {
+        const key = columns[c]?.keys[r];
+        if (key == null) continue;
+        if (d.adding) next[String(key)] = paintTier;
+        else delete next[String(key)];
+      }
+    }
+    d.result = next;
+    setDraft(next);
   }
 
-  function startPaint(key: number) {
+  function startPaint(ci: number, row: number, key: number) {
     if (!editable) return;
-    drag.current = { adding: !current[String(key)] };
-    applyCell(key);
+    const base = { ...(mySlots ?? {}) };
+    drag.current = { adding: !base[String(key)], anchor: { ci, row }, base, result: base };
+    paintTo(ci, row);
+  }
+
+  // Resolve the cell under the pointer via hit-testing so a single move handler
+  // works for both mouse (pointerenter would do) and touch (implicit pointer
+  // capture keeps events on the origin cell, so enter never fires elsewhere).
+  function movePaint(e: React.PointerEvent) {
+    if (!drag.current) return;
+    const cell = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>("[data-ci]");
+    if (!cell) return;
+    const ci = Number(cell.dataset.ci), row = Number(cell.dataset.row);
+    if (Number.isNaN(ci) || Number.isNaN(row)) return;
+    paintTo(ci, row);
   }
 
   function endPaint() {
-    if (!editable || !drag.current) return;
+    const d = drag.current;
+    if (!editable || !d) return;
     drag.current = null;
-    setDraft((d) => {
-      if (d && onChange) onChange(d);
-      return d;
-    });
+    if (onChange) onChange(d.result);
+    setDraft(null);
   }
 
   const hoverInfo = hover !== null ? groupBySlot.get(hover) : null;
@@ -110,7 +152,11 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
 
   function renderTable(kind: "mine" | "group") {
     return (
-      <table className="avgrid" onPointerUp={endPaint} onPointerLeave={endPaint}>
+      <table
+        className="avgrid"
+        onPointerUp={kind === "mine" ? endPaint : undefined}
+        onPointerMove={kind === "mine" ? movePaint : undefined}
+      >
         <thead>
           <tr>
             <th />
@@ -133,12 +179,16 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
                   return (
                     <td
                       key={ci}
+                      data-ci={ci}
+                      data-row={row}
                       className={`slot ${min % 60 === 0 ? "hour" : ""} ${tier === "yes" ? "mine-yes" : tier === "if_needed" ? "mine-if" : ""}`}
                       onPointerDown={(e) => {
                         e.preventDefault();
-                        startPaint(key);
+                        // Keep receiving moves even if the pointer leaves the
+                        // cell/table; guarded because it throws on inactive pointers.
+                        try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+                        startPaint(ci, row, key);
                       }}
-                      onPointerEnter={() => applyCell(key)}
                     />
                   );
                 }
@@ -146,10 +196,14 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
                 const firm = g?.yes.length ?? 0;
                 const soft = (g?.cond.length ?? 0) + (g?.ifNeeded.length ?? 0);
                 const total = firm + soft;
+                const status = composition ? viability.get(key)?.status : undefined;
+                const vClass =
+                  status === "viable" ? "v-ok" : status === "viable_if" ? "v-if" : "";
+                const dim = viableOnly && status !== undefined && status !== "viable";
                 return (
                   <td
                     key={ci}
-                    className={`slot ${min % 60 === 0 ? "hour" : ""}`}
+                    className={`slot ${min % 60 === 0 ? "hour" : ""} ${vClass} ${dim ? "v-dim" : ""}`}
                     style={{
                       background: g?.ifNeeded.length
                         ? `var(--if-needed-hatch), ${heatColor(firm, maxCount)}`
@@ -188,15 +242,57 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
         <div className="legend">
           <span><span className="swatch" style={{ background: heatColor(0, 1) }} /> 0</span>
           <span><span className="swatch" style={{ background: heatColor(Math.ceil(maxCount / 2), maxCount) }} /> some</span>
-          <span><span className="swatch" style={{ background: heatColor(maxCount, maxCount) }} /> all {respondents.length || ""}</span>
+          <span><span className="swatch" style={{ background: heatColor(maxCount, maxCount) }} /> all {filteredRespondents.length || ""}</span>
+          {composition && <span><span className="swatch v-ok" /> composition met</span>}
+          {composition && <span><span className="swatch v-if" /> met if pinged</span>}
           <span>cells show firm+flexible counts · times in {event.timezone}</span>
         </div>
+        {(allTags.length > 0 || composition) && (
+          <div className="gridcontrols">
+            {allTags.length > 0 && (
+              <label>
+                Count only:{" "}
+                <select value={tagFilter ?? ""} onChange={(e) => setTagFilter(e.target.value || null)}>
+                  <option value="">Everyone</option>
+                  {payload.tagGroups.map((grp) => (
+                    <optgroup key={grp.id} label={grp.name}>
+                      {grp.tags.map((t) => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+            )}
+            {composition && (
+              <label>
+                <input type="checkbox" checked={viableOnly} onChange={(e) => setViableOnly(e.target.checked)} />{" "}
+                Dim non-viable slots
+              </label>
+            )}
+          </div>
+        )}
         {renderTable("group")}
       </div>
       <div className="card hoverpanel">
         <h2>Slot details</h2>
         {hoverInfo ? (
           <>
+            {composition && hover !== null && (() => {
+              const v = viability.get(hover);
+              if (!v || v.status === "none") return null;
+              const label =
+                v.status === "viable" ? "Composition met" :
+                v.status === "viable_if" ? "Met only if pinged" : "Composition not met";
+              return (
+                <div className={`who vstatus ${v.status === "viable" ? "v-ok-text" : v.status === "viable_if" ? "v-if-text" : "v-no-text"}`}>
+                  <b>{label}</b>
+                  {v.status === "viable_if" && v.neededNames.length > 0 && (
+                    <> — needs {v.neededNames.map((n) => <span key={n} className="namechip">{n}</span>)}</>
+                  )}
+                </div>
+              );
+            })()}
             <div className="who"><b>Available:</b> {hoverInfo.yes.length ? hoverInfo.yes.map((n) => <span key={n} className="namechip">{n}</span>) : "—"}</div>
             <div className="who"><b>If needed (ping):</b> {[...hoverInfo.cond, ...hoverInfo.ifNeeded].length ? [...new Set([...hoverInfo.cond, ...hoverInfo.ifNeeded])].map((n) => <span key={n} className="namechip">{n}</span>) : "—"}</div>
             <div className="who"><b>Unavailable:</b> {unavailable && unavailable.length ? unavailable.map((n) => <span key={n} className="namechip">{n}</span>) : "—"}</div>

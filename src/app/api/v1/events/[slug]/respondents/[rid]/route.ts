@@ -5,6 +5,7 @@ import { editTokenFrom, isOrganizer } from "@/lib/auth";
 import { getEventRow } from "@/lib/eventData";
 import { patchRespondentInput } from "@/lib/validate";
 import { publish } from "@/lib/sse";
+import { emitChange } from "@/lib/webhooks";
 
 type Ctx = { params: Promise<{ slug: string; rid: string }> };
 
@@ -66,6 +67,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 
   publish(slug, "respondent.updated", { respondentId: r.id });
+  emitChange(ev, "respondent.updated", { respondentId: r.id });
   return NextResponse.json({ ok: true });
 }
 
@@ -79,5 +81,6 @@ export async function DELETE(req: Request, ctx: Ctx) {
 
   db.delete(schema.respondents).where(eq(schema.respondents.id, r.id)).run();
   publish(slug, "respondent.deleted", { respondentId: r.id });
+  emitChange(ev, "respondent.deleted", { respondentId: r.id });
   return NextResponse.json({ ok: true });
 }

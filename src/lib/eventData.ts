@@ -1,6 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { allSlotKeys, type SlotSpec } from "./slots";
+import { viabilityBySlot, type Composition, type SlotViability } from "./composition";
 
 export type EventRow = typeof schema.events.$inferSelect;
 
@@ -37,6 +38,7 @@ export interface PublicEvent {
   deadline: number | null;
   roster: string[] | null;
   finalizedSlots: number[] | null;
+  composition: Composition | null;
   createdAt: number;
 }
 export interface EventPayload {
@@ -117,6 +119,7 @@ export function loadEventPayload(ev: EventRow): EventPayload {
       deadline: ev.deadline,
       roster: ev.rosterJson ? JSON.parse(ev.rosterJson) : null,
       finalizedSlots: ev.finalizedJson ? JSON.parse(ev.finalizedJson) : null,
+      composition: ev.compositionJson ? (JSON.parse(ev.compositionJson) as Composition) : null,
       createdAt: ev.createdAt,
     },
     slots: allSlotKeys(slotSpec(ev)),
@@ -151,16 +154,29 @@ export interface SlotSummary {
   /** conditional folks painted "yes" — the "ping me if needed" pool */
   conditionalYes: number;
   names: { yes: string[]; ifNeeded: string[]; conditionalYes: string[] };
+  /** Composition viability under the event's rule (status "none" when no rule). */
+  viability: SlotViability;
 }
 
 export interface Summary {
   respondentCount: number;
   topSlots: SlotSummary[];
   missingRoster: string[];
-  /** Phase 2 will add: composition viability per slot. */
+  composition: Composition | null;
+  /** Slots firmly viable under the composition rule (0 when no rule). */
+  viableCount: number;
 }
 
+const VIABILITY_RANK: Record<SlotViability["status"], number> = {
+  viable: 0,
+  viable_if: 1,
+  none: 2,
+  unviable: 3,
+};
+
 export function computeSummary(payload: EventPayload, topN = 10): Summary {
+  const composition = payload.event.composition;
+  const viability = viabilityBySlot(payload, composition);
   const bySlot = new Map<number, SlotSummary>();
   for (const key of payload.slots) {
     bySlot.set(key, {
@@ -169,6 +185,7 @@ export function computeSummary(payload: EventPayload, topN = 10): Summary {
       ifNeeded: 0,
       conditionalYes: 0,
       names: { yes: [], ifNeeded: [], conditionalYes: [] },
+      viability: viability.get(key) ?? { status: "none", neededNames: [] },
     });
   }
   for (const r of payload.respondents) {
@@ -187,10 +204,12 @@ export function computeSummary(payload: EventPayload, topN = 10): Summary {
       }
     }
   }
+  // Composition-viable slots rank first (spec §3.7), then by firm/soft counts.
   const ranked = [...bySlot.values()]
     .filter((s) => s.yes + s.ifNeeded + s.conditionalYes > 0)
     .sort(
       (a, b) =>
+        VIABILITY_RANK[a.viability.status] - VIABILITY_RANK[b.viability.status] ||
         b.yes - a.yes ||
         b.conditionalYes - a.conditionalYes ||
         b.ifNeeded - a.ifNeeded ||
@@ -201,5 +220,14 @@ export function computeSummary(payload: EventPayload, topN = 10): Summary {
   const respondedNames = new Set(payload.respondents.map((r) => r.name.toLowerCase()));
   const missingRoster = (payload.event.roster ?? []).filter((n) => !respondedNames.has(n.toLowerCase()));
 
-  return { respondentCount: payload.respondents.length, topSlots: ranked, missingRoster };
+  let viableCount = 0;
+  for (const v of viability.values()) if (v.status === "viable") viableCount++;
+
+  return {
+    respondentCount: payload.respondents.length,
+    topSlots: ranked,
+    missingRoster,
+    composition,
+    viableCount,
+  };
 }

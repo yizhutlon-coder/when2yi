@@ -6,6 +6,7 @@ import { getEventRow } from "@/lib/eventData";
 import { newId, newToken } from "@/lib/ids";
 import { signInInput } from "@/lib/validate";
 import { publish } from "@/lib/sse";
+import { emitChange } from "@/lib/webhooks";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
@@ -96,5 +97,6 @@ export async function POST(req: Request, ctx: Ctx) {
   }
 
   publish(slug, "respondent.created", { respondentId: id, name: input.name });
+  emitChange(ev, "respondent.created", { respondentId: id, name: input.name });
   return NextResponse.json({ respondentId: id, editToken, existing: false }, { status: 201 });
 }

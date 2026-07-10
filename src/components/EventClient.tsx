@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { EventPayload } from "@/lib/eventData";
+import { viableBlocks, type ViableBlock } from "@/lib/composition";
 import AvailabilityGrid, { type MySlots, type Tier } from "./AvailabilityGrid";
 
 interface Me {
@@ -15,11 +16,14 @@ interface SummarySlot {
   ifNeeded: number;
   conditionalYes: number;
   names: { yes: string[]; ifNeeded: string[]; conditionalYes: string[] };
+  viability: { status: "none" | "viable" | "viable_if" | "unviable"; neededNames: string[] };
 }
 interface Summary {
   respondentCount: number;
   topSlots: SummarySlot[];
   missingRoster: string[];
+  composition: { requirements: { tagId: string | null; min: number }[] } | null;
+  viableCount: number;
 }
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -40,6 +44,42 @@ function slotLabel(payload: EventPayload, slotKey: number): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function fmtMinOfDay(m: number): string {
+  const h = Math.floor(m / 60) % 24;
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
+/** "Mon Jul 20, 11:00 AM – 1:00 PM" for a contiguous block (end = last slot + 15 min). */
+function blockLabel(payload: EventPayload, b: ViableBlock): string {
+  if (payload.event.mode === "days") {
+    const day = Math.floor(b.startKey / 1440);
+    return `${DAY_NAMES[day]}, ${fmtMinOfDay(b.startKey % 1440)} – ${fmtMinOfDay((b.endKey % 1440) + 15)}`;
+  }
+  const tz = payload.event.timezone;
+  const start = new Date(b.startKey * 1000);
+  const end = new Date((b.endKey + 900) * 1000);
+  const day = start.toLocaleDateString("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" });
+  const t = (d: Date) => d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
+  return `${day}, ${t(start)} – ${t(end)}`;
+}
+
+function fmtDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+}
+
+/** Paste-ready roster for Discord/Chat: time, role needs, then @-tagged people. */
+function blockCopyText(payload: EventPayload, b: ViableBlock): string {
+  const lines = [`${blockLabel(payload, b)} (${fmtDuration(b.minutes)})`];
+  const roleStr = b.roles.map((r) => `${r.label} ${r.min}`).join(", ");
+  const totalStr = b.totalMin > 0 ? `${roleStr ? " · " : ""}${b.totalMin}+ total` : "";
+  if (roleStr || totalStr) lines.push(`${roleStr}${totalStr}`);
+  if (b.attendees.length) lines.push(b.attendees.map((a) => `@${a.handle || a.name}`).join(" "));
+  return lines.join("\n");
 }
 
 export default function EventClient({ slug }: { slug: string }) {
@@ -124,15 +164,56 @@ export default function EventClient({ slug }: { slug: string }) {
     refresh();
   }
 
+  const [copiedBlock, setCopiedBlock] = useState<number | null>(null);
+  function copyBlock(b: ViableBlock, i: number) {
+    navigator.clipboard?.writeText(blockCopyText(payload!, b));
+    setCopiedBlock(i);
+    setTimeout(() => setCopiedBlock((c) => (c === i ? null : c)), 1500);
+  }
+
   // --- painting / autosave ---
   const [paintTier, setPaintTier] = useState<Tier>("yes");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [localSlots, setLocalSlots] = useState<MySlots | null>(null);
 
+  // --- composition rule (organizer, §3.7) ---
+  const [compDraft, setCompDraft] = useState<{ tagId: string | null; min: number }[]>([]);
+  const [compAllowShift, setCompAllowShift] = useState(true);
+  const [compNotice, setCompNotice] = useState("");
+  useEffect(() => {
+    setCompDraft(payload?.event.composition?.requirements ?? []);
+    setCompAllowShift(payload?.event.composition?.allowRosterShift ?? true);
+  }, [payload?.event.composition]);
+
+  async function saveComposition() {
+    if (!organizerToken) return;
+    setCompNotice("Saving…");
+    const res = await fetch(`/api/v1/events/${slug}/composition`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-organizer-token": organizerToken },
+      body: JSON.stringify({ requirements: compDraft.filter((r) => r.min >= 1), allowRosterShift: compAllowShift }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setCompNotice(typeof data.error === "string" ? data.error : "Save failed");
+      return;
+    }
+    setCompNotice(`Saved — ${data.changedSlots} slot${data.changedSlots === 1 ? "" : "s"} changed viability.`);
+    refresh();
+  }
+
   const myRespondent = useMemo(
     () => payload?.respondents.find((r) => r.id === me?.respondentId) ?? null,
     [payload, me]
   );
+
+  // Contiguous viable blocks + swappability for the Best-times panel.
+  const blocks = useMemo(() => {
+    if (!payload?.event.composition) return [];
+    const label = (id: string) =>
+      payload.tagGroups.flatMap((g) => g.tags).find((t) => t.id === id)?.label ?? id;
+    return viableBlocks(payload, payload.event.composition, label);
+  }, [payload]);
   useEffect(() => {
     // Respondent got deleted (moderation) → drop stale identity.
     if (payload && me && !myRespondent) {
@@ -248,6 +329,77 @@ export default function EventClient({ slug }: { slug: string }) {
         </form>
       )}
 
+      {organizerToken && (
+        <details className="card">
+          <summary>
+            Composition rule{" "}
+            <span className="hint">(organizer — edit anytime; everyone sees the result)</span>
+          </summary>
+          {compDraft.length === 0 && (
+            <p className="sub" style={{ margin: "0 0 8px" }}>
+              No rule set — every slot with availability just shows counts. Add requirements like
+              “≥1 Tank, ≥1 Healer, ≥4 total” and viable slots get outlined and ranked first.
+            </p>
+          )}
+          {compDraft.map((r, i) => (
+            <div className="row" key={i} style={{ alignItems: "flex-end", gap: 8 }}>
+              <label className="field" style={{ marginBottom: 8 }}>
+                Requirement
+                <select
+                  value={r.tagId ?? ""}
+                  onChange={(e) =>
+                    setCompDraft((d) => d.map((x, j) => (j === i ? { ...x, tagId: e.target.value || null } : x)))
+                  }
+                >
+                  <option value="">Any respondent (total)</option>
+                  {tagGroups.map((g) => (
+                    <optgroup key={g.id} label={g.name}>
+                      {g.tags.map((t) => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+              <label className="field" style={{ flex: "0 0 90px", marginBottom: 8 }}>
+                At least
+                <input
+                  type="number"
+                  min={1}
+                  value={r.min}
+                  onChange={(e) =>
+                    setCompDraft((d) => d.map((x, j) => (j === i ? { ...x, min: Math.max(1, Number(e.target.value) || 1) } : x)))
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="small danger"
+                style={{ marginBottom: 12 }}
+                onClick={() => setCompDraft((d) => d.filter((_, j) => j !== i))}
+              >
+                remove
+              </button>
+            </div>
+          ))}
+          <label className="field" style={{ marginTop: 12, marginBottom: 6, fontWeight: 600 }}>
+            <input type="checkbox" checked={compAllowShift} onChange={(e) => setCompAllowShift(e.target.checked)} />{" "}
+            Is swapping members during the event allowed?
+            <span className="hint" style={{ display: "block", fontWeight: 400 }}>
+              On (default): different people can cover different parts of a meeting. Off: a time only
+              counts when one roster can staff the whole block start to finish.
+            </span>
+          </label>
+          <div className="toolbar" style={{ marginTop: 4 }}>
+            <button type="button" onClick={() => setCompDraft((d) => [...d, { tagId: null, min: 1 }])}>
+              + Add requirement
+            </button>
+            <button type="button" className="primary" onClick={saveComposition}>Save rule</button>
+            {compNotice && <span className="sub" style={{ margin: 0 }}>{compNotice}</span>}
+          </div>
+        </details>
+      )}
+
       <AvailabilityGrid payload={payload} mySlots={deadlinePassed ? null : mySlots} paintTier={paintTier} onChange={saveSlots} />
 
       {me && !deadlinePassed && (
@@ -260,8 +412,73 @@ export default function EventClient({ slug }: { slug: string }) {
 
       <div className="row" style={{ marginTop: 16 }}>
         <div className="card">
-          <h2>Best times{summary ? ` (${summary.respondentCount} responded)` : ""}</h2>
-          {summary?.topSlots.length ? (
+          <h2>
+            Best times{summary ? ` (${summary.respondentCount} responded)` : ""}
+            {summary?.composition ? (
+              <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 13 }}>
+                {" "}· {summary.viableCount} viable
+              </span>
+            ) : null}
+          </h2>
+          {summary?.composition ? (
+            blocks.length ? (
+              <div className="blocks">
+                {blocks.slice(0, 8).map((b, i) => (
+                  <details key={i} className="blockrow">
+                    <summary>
+                      <span className="blocktime">{blockLabel(payload, b)}</span>
+                      <span className="blockdur">{fmtDuration(b.minutes)}</span>
+                      {b.wholeBlockStaffable ? (
+                        <span className="vbadge v-ok-text">✓ staffable throughout</span>
+                      ) : (
+                        <span className="vbadge v-if-text">roster shifts</span>
+                      )}
+                      <button
+                        type="button"
+                        className="small blockcopy"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyBlock(b, i); }}
+                      >
+                        {copiedBlock === i ? "Copied!" : "Copy roster"}
+                      </button>
+                    </summary>
+                    <div className="blockbody">
+                      <div className="rolepills">
+                        {b.roles.map((r) => (
+                          <span key={r.label} className={`rolepill ${r.swappable ? "spare" : "tight"}`}>
+                            {r.label} {r.available}/{r.min}
+                            {r.swappable ? " · spare" : " · locked"}
+                          </span>
+                        ))}
+                        {b.totalMin > 0 && (
+                          <span className={`rolepill ${b.totalAvailable > b.totalMin ? "spare" : "tight"}`}>
+                            Total {b.totalAvailable}/{b.totalMin}
+                          </span>
+                        )}
+                      </div>
+                      {b.wholeBlockStaffable ? (
+                        <>
+                          <div className="who">
+                            <b>Must attend:</b>{" "}
+                            {b.locked.length ? b.locked.map((n) => <span key={n} className="namechip">{n}</span>) : "—"}
+                          </div>
+                          <div className="who">
+                            <b>Swappable:</b>{" "}
+                            {b.swappable.length ? b.swappable.map((n) => <span key={n} className="namechip">{n}</span>) : "—"}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="sub" style={{ margin: 0 }}>
+                          Every 15-min slot here is viable, but no single roster covers the whole block — attendees differ across it.
+                        </p>
+                      )}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            ) : (
+              <p className="sub" style={{ margin: 0 }}>No time block currently meets the composition rule.</p>
+            )
+          ) : summary?.topSlots.length ? (
             <table className="plain">
               <thead>
                 <tr><th>Slot</th><th>Sure</th><th>Ping-if-needed</th></tr>

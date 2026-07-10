@@ -1,6 +1,7 @@
 # When2Yi — handoff record
 
-**From:** Cowork session, 2026-07-09 (research → spec → Phase 1 scaffold)
+**From:** Cowork session 2026-07-09 (Phase 1) → Claude Code session 2026-07-09
+(Phase 2 web-app half)
 **For:** the next Claude Code session (and future Yi)
 
 ## 1. Where things stand
@@ -12,12 +13,19 @@
   mid-poll (re-arm + viability-diff guardrails); ICS-paste calendar overlay
   before Google OAuth; hosting deferred (must run standalone: one container,
   SQLite inside).
-- **Phase 1 is complete and verified** (see §3). Phases 2–4 are specced but
-  not started.
+- **Phase 1 complete and verified** (see §3).
+- **Phase 2 web-app half complete and verified** (see §8, added this session):
+  composition-viability engine (bipartite matching), heatmap viability
+  outline + tag filter + organizer composition editor, and outbound webhooks
+  with `slot.viable`/`slot.unviable` re-arm. Remaining Phase 2 item is the
+  ThatYiBot `/meet` plugin (separate repo). Not-yet-built webhook types:
+  `deadline.passed` (needs the croner chore) and `event.finalized` (Phase 3).
+- **Env note:** dev now runs on Node 24 via `better-sqlite3@^12` (the v11 pin
+  had no Node 24 prebuild). Committed.
 - **ThatYiBot does not exist yet** — C:\ThatYiBot holds only its own feature
-  spec. The When2Yi Phase 2 "ThatYiBot plugin" work therefore lands in that
-  project once the bot is scaffolded; until then, webhooks + `/summary`
-  polling are the integration surface.
+  spec. The When2Yi "ThatYiBot plugin" work lands in that project once the bot
+  is scaffolded; until then, webhooks + `/summary` polling are the integration
+  surface, both now live.
 
 ## 2. What Phase 1 delivered
 
@@ -68,18 +76,14 @@ Next.js 15 (App Router) + TypeScript + Drizzle + better-sqlite3, ~35 files:
 
 ## 5. Phase 2 build order (from spec §3.6–§3.8, §7)
 
-1. Composition-viability engine: rule = list of `{tagId|any, min}`;
-   viability per slot via **bipartite matching** (multi-role people can't be
-   double-counted — greedy is wrong). Wire into summary + heatmap outline +
-   tag-filtered views.
-2. Outbound webhooks: subscribe URL per event/global (table exists), HMAC
-   signature, change-driven events (`respondent.created`,
-   `availability.updated`, `slot.viable`/`slot.unviable` with re-arm
-   semantics per decisions log #8, `event.finalized`, `deadline.passed` —
-   the one timer the core keeps). Payloads embed the summary block.
-3. ThatYiBot `/meet` plugin (in the bot repo, once the bot exists): create/
-   status/finalize commands + the alert-rule engine (threshold, look-ahead,
-   conditional-fill pings, deadline nags) — all bot-side.
+1. ✅ **Composition-viability engine** — `src/lib/composition.ts`. DONE (§8).
+2. ✅ **Outbound webhooks** — `src/lib/webhooks.ts` + routes. DONE (§8) except
+   `deadline.passed` (needs the croner chore) and `event.finalized` (Phase 3).
+3. ⏳ **ThatYiBot `/meet` plugin** (in the bot repo, once the bot exists):
+   create/status/finalize commands + the alert-rule engine (threshold,
+   look-ahead, conditional-fill pings, deadline nags) — all bot-side. The
+   integration surface it consumes (webhooks incl. conditional-fill
+   `neededNames`, `/summary`) is live.
 
 ## 6. Repo / environment notes
 
@@ -110,3 +114,71 @@ feasibility (Google sensitive-scope verification, Graph MSA limitations,
 ICS-feed staleness, add-to-calendar links) were researched 2026-07-09.
 Net: nobody in the grid-poll space ships a documented public API +
 webhooks — that's this project's lane.
+
+## 8. Phase 2 web-app half — built & verified (2026-07-09)
+
+New files: `src/lib/composition.ts`, `src/lib/webhooks.ts`, routes
+`…/composition`, `…/webhooks`, `…/webhooks/[wid]`. Touched: `eventData.ts`
+(composition on payload; viability in summary + viable-first ranking),
+`validate.ts` (composition/webhook zod), `AvailabilityGrid.tsx` (outline +
+tag filter + dim toggle + hover viability), `EventClient.tsx` (organizer
+composition editor + best-times Composition column), `globals.css`,
+`openapi.ts`. `emitChange` wired into all mutation routes.
+
+**Composition engine correctness (cost a real bug, now covered by 10 asserts
+in scratchpad `test_matching.mjs`):** tag requirements are DISJOINT SEATS via
+bipartite max-flow (multi-role person fills one seat — greedy overpromises);
+a `tagId:null` "total" is INCLUSIVE HEADCOUNT (`attendees ≥ N`), NOT part of
+the matching. First implementation wrongly modeled total as N extra distinct
+seats and called `≥1T ≥1H ≥3total` with {T,H,X} unviable — fixed. Statuses:
+viable (firm attendees suffice) / viable_if (only with conditional/if-needed;
+`neededNames` lists who) / unviable.
+
+**Webhooks:** HMAC-SHA256 in `x-when2yi-signature`, type in `x-when2yi-event`,
+every payload embeds the summary block. `slot.viable`/`slot.unviable` re-arm
+per subscriber via `firedKeysJson` (seeded with currently-viable slots at
+subscribe so a fresh sub isn't flooded). Verified end-to-end (scratchpad
+`test_webhooks.mjs`): flip a slot viable→unviable→viable fires
+slot.viable→slot.unviable→slot.viable, HMAC valid each time, already-viable
+slots never re-fire on unrelated edits.
+
+**UI verified** via accessibility snapshot + computed-style inspection (the
+browser-pane screenshot tool was stuck this session — SSE/renderer, not a
+code fault; every server request returned 200): 12 viable cells render a
+solid green inset ring, 4 viable_if cells an amber ring; composition editor,
+tag filter, dim toggle, and "N viable" best-times all present. `tsc` clean.
+
+**Follow-up polish (2026-07-10):** host-only config now lives on the CREATE
+page in collapsible `<details>` (Sign-up dropdowns / Composition rule /
+Extras, collapsed by default); composition can be set at creation, referencing
+role options by `{group index, option label}` which the create route resolves
+to tagIds after inserting tags (see `compositionRefInput`). The organizer
+editor on the event page is also collapsed now (still there for mid-poll
+edits). Viable cells got a bold white+green double-ring + glow. Best-times, when
+a composition exists, now shows contiguous **viable blocks** (expandable) with
+duration, per-role available/min (spare vs locked), and must-attend vs swappable
+people — `viableBlocks()` in composition.ts, whole-block staffability via the
+same matching. Verified live: create-time composition resolves, blocks/roles/
+swappability correct, sections collapsed.
+
+**Roster-shift + copy (2026-07-10):** composition gained `allowRosterShift`
+(default true). Lax = Best-times blocks are per-slot-viable runs (may show
+"roster shifts"); strict (`false`) = `viableBlocks` segments into maximal
+SINGLE-ROSTER runs so every shown block is staffable throughout. Toggle "Is
+swapping members during the event allowed?" lives in the composition-rule
+section (create page + organizer editor); stored in compositionJson via both
+create route and PUT. Note it only affects block segmentation, not per-slot
+viability/heatmap/webhooks (a single 15-min slot has no "shift"). Each block
+has a **Copy roster** button → clipboard text: time+duration, role mins
+("Tank 1, Healer 1 · 2+ total"), then `@handle`-or-`@name` per whole-block
+attendee (uses `discordHandle` when set) for pasting into Discord/Chat.
+Multi-role people ("willing to do either") are already handled by the
+bipartite matching — one seat at a time, any valid assignment. All verified
+live (lax→1 shifting block, strict→2 staffable blocks, copy text exact).
+
+**Gaps to close next:** (a) no test framework in-repo yet — port the two
+scratchpad test scripts to vitest (they caught the matching bug); (b)
+`deadline.passed`/`event.finalized` webhooks; (c) `PUT /tag-groups` (tag
+groups are still create-time only), so composition can only reference tags
+defined at creation; (d) viable_if cell ring is solid amber not dashed
+(box-shadow can't dash) — only the legend swatch is dashed.

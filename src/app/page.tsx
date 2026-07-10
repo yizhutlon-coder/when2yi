@@ -91,6 +91,8 @@ export default function CreateEventPage() {
   const [deadline, setDeadline] = useState("");
   const [roster, setRoster] = useState("");
   const [groups, setGroups] = useState<TagGroupDraft[]>([]);
+  const [comp, setComp] = useState<{ group: number | null; option: string | null; min: number }[]>([]);
+  const [allowRosterShift, setAllowRosterShift] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -99,6 +101,25 @@ export default function CreateEventPage() {
     setError("");
     setBusy(true);
     try {
+      // Only non-empty groups are sent; composition refers to groups by index, so
+      // remap each requirement's index from the full list to the sent (filtered) list.
+      const keptGroups = groups.filter((g) => g.name.trim() && g.options.trim());
+      const keptIndex = new Map<number, number>();
+      groups.forEach((g, gi) => {
+        const ki = keptGroups.indexOf(g);
+        if (ki >= 0) keptIndex.set(gi, ki);
+      });
+      const composition: { group: number | null; option: string | null; min: number }[] = [];
+      for (const r of comp) {
+        if (r.min < 1) continue;
+        if (r.group === null || r.option === null) {
+          composition.push({ group: null, option: null, min: r.min });
+          continue;
+        }
+        const gi = keptIndex.get(r.group);
+        if (gi !== undefined) composition.push({ group: gi, option: r.option, min: r.min });
+      }
+
       const body = {
         name,
         description: description || undefined,
@@ -110,14 +131,14 @@ export default function CreateEventPage() {
         timezone,
         deadline: deadline ? Math.floor(new Date(deadline).getTime() / 1000) : undefined,
         roster: roster.trim() ? roster.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
-        tagGroups: groups
-          .filter((g) => g.name.trim() && g.options.trim())
-          .map((g) => ({
-            name: g.name.trim(),
-            multiSelect: g.multiSelect,
-            required: false,
-            options: g.options.split(",").map((s) => s.trim()).filter(Boolean),
-          })),
+        tagGroups: keptGroups.map((g) => ({
+          name: g.name.trim(),
+          multiSelect: g.multiSelect,
+          required: false,
+          options: g.options.split(",").map((s) => s.trim()).filter(Boolean),
+        })),
+        composition: composition.length ? composition : undefined,
+        allowRosterShift: composition.length ? allowRosterShift : undefined,
       };
       const res = await fetch("/api/v1/events", {
         method: "POST",
@@ -156,46 +177,50 @@ export default function CreateEventPage() {
             <span className={`chip ${mode === "dates" ? "on" : ""}`} onClick={() => setMode("dates")}>Specific dates</span>
             <span className={`chip ${mode === "days" ? "on" : ""}`} onClick={() => setMode("days")}>Days of the week</span>
           </div>
-          {mode === "dates" ? (
-            <MiniCalendar
-              selected={dates}
-              onToggle={(d) => setDates((s) => { const n = new Set(s); if (n.has(d)) n.delete(d); else n.add(d); return n; })}
-            />
-          ) : (
-            <div className="chips">
-              {DAY_NAMES.map((label, i) => (
-                <span key={i} className={`chip ${days.has(i) ? "on" : ""}`}
-                  onClick={() => setDays((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; })}>
-                  {label}
-                </span>
-              ))}
+          <div className="when-layout">
+            <div className="when-picker">
+              {mode === "dates" ? (
+                <MiniCalendar
+                  selected={dates}
+                  onToggle={(d) => setDates((s) => { const n = new Set(s); if (n.has(d)) n.delete(d); else n.add(d); return n; })}
+                />
+              ) : (
+                <div className="chips">
+                  {DAY_NAMES.map((label, i) => (
+                    <span key={i} className={`chip ${days.has(i) ? "on" : ""}`}
+                      onClick={() => setDays((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; })}>
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-          <div className="row" style={{ marginTop: 14 }}>
-            <label className="field">
-              No earlier than
-              <select value={startHour} onChange={(e) => setStartHour(Number(e.target.value))}>
-                {HOURS.slice(0, 24).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              No later than
-              <select value={endHour} onChange={(e) => setEndHour(Number(e.target.value))}>
-                {HOURS.slice(1).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              Time zone
-              <select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-                {timezones.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-              </select>
-            </label>
+            <div className="when-times">
+              <label className="field">
+                No earlier than
+                <select value={startHour} onChange={(e) => setStartHour(Number(e.target.value))}>
+                  {HOURS.slice(0, 24).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                </select>
+              </label>
+              <label className="field">
+                No later than
+                <select value={endHour} onChange={(e) => setEndHour(Number(e.target.value))}>
+                  {HOURS.slice(1).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                </select>
+              </label>
+              <label className="field">
+                Time zone
+                <select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                  {timezones.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+                </select>
+              </label>
+              {mode === "days" && <p className="sub" style={{ margin: 0 }}>Days-of-the-week events assume everyone shares this time zone (When2Meet parity).</p>}
+            </div>
           </div>
-          {mode === "days" && <p className="sub" style={{ margin: 0 }}>Days-of-the-week events assume everyone shares this time zone (When2Meet parity).</p>}
         </div>
 
-        <div className="card">
-          <h2>Sign-up dropdowns <span style={{ fontWeight: 400, color: "var(--muted)" }}>(optional — roles, potluck dishes, whatever)</span></h2>
+        <details className="card">
+          <summary>Sign-up dropdowns <span className="hint">(optional — roles, potluck dishes, whatever)</span></summary>
           {groups.map((g, i) => (
             <div className="row" key={i} style={{ alignItems: "flex-end" }}>
               <label className="field">
@@ -213,10 +238,61 @@ export default function CreateEventPage() {
             </div>
           ))}
           <button type="button" onClick={() => setGroups((gs) => [...gs, { name: "", options: "", multiSelect: true }])}>+ Add dropdown</button>
-        </div>
+        </details>
 
-        <div className="card">
-          <h2>Extras <span style={{ fontWeight: 400, color: "var(--muted)" }}>(optional)</span></h2>
+        <details className="card">
+          <summary>Composition rule <span className="hint">(optional — when is a slot “viable”? e.g. ≥1 Tank, ≥1 Healer, ≥4 total)</span></summary>
+          <p className="sub" style={{ margin: "0 0 10px" }}>
+            You (the host) set this; everyone else just sees which slots light up as viable. Role
+            requirements reference the sign-up dropdown options above.
+          </p>
+          {comp.map((r, i) => (
+            <div className="row" key={i} style={{ alignItems: "flex-end", gap: 8 }}>
+              <label className="field" style={{ marginBottom: 8 }}>
+                Requirement
+                <select
+                  value={r.group !== null && r.option !== null ? `${r.group}::${r.option}` : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setComp((c) => c.map((x, j) => {
+                      if (j !== i) return x;
+                      if (!v) return { ...x, group: null, option: null };
+                      const sep = v.indexOf("::");
+                      return { ...x, group: Number(v.slice(0, sep)), option: v.slice(sep + 2) };
+                    }));
+                  }}
+                >
+                  <option value="">Any respondent (total)</option>
+                  {groups.map((g, gi) => {
+                    const opts = g.options.split(",").map((s) => s.trim()).filter(Boolean);
+                    return opts.length ? (
+                      <optgroup key={gi} label={g.name.trim() || `Group ${gi + 1}`}>
+                        {opts.map((label) => <option key={label} value={`${gi}::${label}`}>{label}</option>)}
+                      </optgroup>
+                    ) : null;
+                  })}
+                </select>
+              </label>
+              <label className="field" style={{ flex: "0 0 90px", marginBottom: 8 }}>
+                At least
+                <input type="number" min={1} value={r.min} onChange={(e) => setComp((c) => c.map((x, j) => (j === i ? { ...x, min: Math.max(1, Number(e.target.value) || 1) } : x)))} />
+              </label>
+              <button type="button" className="small danger" style={{ marginBottom: 12 }} onClick={() => setComp((c) => c.filter((_, j) => j !== i))}>remove</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setComp((c) => [...c, { group: null, option: null, min: 1 }])}>+ Add requirement</button>
+          <label className="field" style={{ marginTop: 14, marginBottom: 0, fontWeight: 600 }}>
+            <input type="checkbox" checked={allowRosterShift} onChange={(e) => setAllowRosterShift(e.target.checked)} />{" "}
+            Is swapping members during the event allowed?
+            <span className="hint" style={{ display: "block", fontWeight: 400 }}>
+              On (default): different people can cover different parts of a meeting. Off: a time only
+              counts when one roster can staff the whole block start to finish.
+            </span>
+          </label>
+        </details>
+
+        <details className="card">
+          <summary>Extras <span className="hint">(optional)</span></summary>
           <div className="row">
             <label className="field">
               Response deadline
@@ -227,7 +303,7 @@ export default function CreateEventPage() {
               <input type="text" value={roster} onChange={(e) => setRoster(e.target.value)} placeholder="Yi, Sam, Priya" />
             </label>
           </div>
-        </div>
+        </details>
 
         {error && <p className="error">{error}</p>}
         <button className="primary" disabled={busy} type="submit">
