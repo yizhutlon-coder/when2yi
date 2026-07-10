@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EventPayload } from "@/lib/eventData";
 import { dayColumns, zonedEpoch } from "@/lib/slots";
 import { viabilityBySlot } from "@/lib/composition";
@@ -88,6 +88,32 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
   const maxCount = Math.max(1, filteredRespondents.length);
   const [hover, setHover] = useState<number | null>(null);
 
+  // Horizontal scroll controls: the thin native scrollbar is hard to grab on
+  // touch (and the paint cells eat swipes), so offer ◀ ▶ buttons when the grid
+  // is wider than its box. Both grids scroll together to stay column-aligned.
+  const gridsRef = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      let over = false;
+      gridsRef.current?.querySelectorAll<HTMLElement>(".gridbox").forEach((b) => {
+        if (b.scrollWidth > b.clientWidth + 2) over = true;
+      });
+      setOverflowing(over);
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, [columns]);
+
+  function scrollGrids(dir: 1 | -1) {
+    const boxes = [...(gridsRef.current?.querySelectorAll<HTMLElement>(".gridbox") ?? [])];
+    if (!boxes.length) return;
+    // Absolute target off the first grid so both grids land at the same column.
+    const target = boxes[0].scrollLeft + dir * Math.max(176, boxes[0].clientWidth * 0.8);
+    boxes.forEach((b) => b.scrollTo({ left: target, behavior: "smooth" }));
+  }
+
   // --- painting: When2Meet-style rectangular drag ---
   // The anchor is the cell where the drag started; as the pointer moves we
   // repaint the whole rectangle from that anchor to the cell under the pointer,
@@ -153,7 +179,7 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
   function renderTable(kind: "mine" | "group") {
     return (
       <table
-        className="avgrid"
+        className={`avgrid avgrid-${kind}`}
         onPointerUp={kind === "mine" ? endPaint : undefined}
         onPointerMove={kind === "mine" ? movePaint : undefined}
       >
@@ -225,7 +251,15 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
   }
 
   return (
-    <div className="grids">
+    <>
+      {overflowing && (
+        <div className="gridscroll">
+          <button type="button" className="small" onClick={() => scrollGrids(-1)} aria-label="Scroll to earlier days">◀ Earlier</button>
+          <span className="sub" style={{ margin: 0 }}>swipe or use these to see more days</span>
+          <button type="button" className="small" onClick={() => scrollGrids(1)} aria-label="Scroll to later days">Later ▶</button>
+        </div>
+      )}
+      <div className="grids" ref={gridsRef}>
       {editable && (
         <div className="gridbox">
           <h2>Your availability</h2>
@@ -301,6 +335,7 @@ export default function AvailabilityGrid({ payload, mySlots, paintTier, onChange
           <p className="sub" style={{ margin: 0 }}>Hover the group grid to see who can make it.</p>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

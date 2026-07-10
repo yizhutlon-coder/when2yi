@@ -104,16 +104,22 @@ button.small { padding: 3px 9px; font-size: 13px; }
 .cal-nav b { min-width: 130px; text-align: center; }
 
 /* availability grid */
+.gridscroll { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.gridscroll button { font-weight: 600; }
+.gridscroll .sub { flex: 1; text-align: center; }
 .grids { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
-.gridbox { overflow-x: auto; }
-.avgrid { border-collapse: collapse; touch-action: none; }
+/* min-width:0 lets a wide grid scroll inside its box instead of stretching the row */
+.gridbox { overflow-x: auto; -webkit-overflow-scrolling: touch; min-width: 0; max-width: 100%; }
+.avgrid { border-collapse: collapse; width: max-content; }
+/* Paint grid captures touch (drag to paint); the read-only group grid stays scrollable. */
+.avgrid-mine { touch-action: none; }
 .avgrid th { font-size: 11px; color: var(--muted); font-weight: 600; padding: 2px 4px; }
 .avgrid td.timelabel {
   font-size: 10px; color: var(--muted); text-align: right; padding-right: 6px;
   border: none; white-space: nowrap; transform: translateY(-50%);
 }
 .avgrid td.slot {
-  width: 44px; height: 15px; border: 1px solid var(--line); cursor: pointer; padding: 0;
+  width: 44px; min-width: 44px; height: 15px; border: 1px solid var(--line); cursor: pointer; padding: 0;
   position: relative; font-size: 10px; text-align: center; color: #223;
 }
 .avgrid td.slot.hour { border-top: 2px solid #b7c1d1; }
